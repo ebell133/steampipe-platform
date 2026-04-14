@@ -18,17 +18,14 @@ RUN apt-get update && \
     cp /tmp/steampipe_postgres_gcp.pg14.linux_amd64/steampipe_postgres_gcp.so "$(pg_config --pkglibdir)/" && \
     cp /tmp/steampipe_postgres_gcp.pg14.linux_amd64/steampipe_postgres_gcp.control "$(pg_config --sharedir)/extension/" && \
     cp /tmp/steampipe_postgres_gcp.pg14.linux_amd64/steampipe_postgres_gcp--1.0.sql "$(pg_config --sharedir)/extension/" && \
-    rm -rf /tmp/* /var/lib/apt/lists/*
-# Kubernetes FDW
-COPY vendor/fdw/kubernetes/steampipe_postgres_kubernetes.so /tmp/
-COPY vendor/fdw/kubernetes/steampipe_postgres_fdw_go.so /tmp/
-COPY vendor/fdw/kubernetes/steampipe_postgres_kubernetes.control /tmp/
-COPY vendor/fdw/kubernetes/steampipe_postgres_kubernetes--1.0.sql /tmp/
-RUN cp /tmp/steampipe_postgres_kubernetes.so "$(pg_config --pkglibdir)/" && \
+    # Kubernetes FDW (self-built, hosted on GitHub release)
+    curl -L -o /tmp/k8s-fdw.tar.gz \
+      "https://github.com/ebell133/steampipe-platform/releases/download/k8s-fdw-v1.0.0/steampipe_postgres_kubernetes.pg14.linux_amd64.tar.gz" && \
+    tar -xzf /tmp/k8s-fdw.tar.gz -C /tmp && \
+    cp /tmp/steampipe_postgres_kubernetes.so "$(pg_config --pkglibdir)/" && \
     cp /tmp/steampipe_postgres_fdw_go.so "$(pg_config --pkglibdir)/" && \
     cp /tmp/steampipe_postgres_kubernetes.control "$(pg_config --sharedir)/extension/" && \
     cp /tmp/steampipe_postgres_kubernetes--1.0.sql "$(pg_config --sharedir)/extension/" && \
-    rm -f /tmp/steampipe_postgres_*
-    
+    rm -rf /tmp/* /var/lib/apt/lists/*
 
 USER 26
