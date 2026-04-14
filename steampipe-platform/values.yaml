@@ -3,7 +3,7 @@ namespace: steampipe
 database:
   clusterName: steampipe-db
   instances: 1
-  imageName: eliaz133/steampipe-pg14:14.2-bookworm
+  imageName: eliaz133/steampipe-pg14:14.3-bookworm
   enableSuperuserAccess: true
   storageSize: 5Gi
   parameters:
