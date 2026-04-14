@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "steampipe-platform.fullname" . }}-bootstrap-sql
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "steampipe-platform.labels" . | nindent 4 }}
+data:
+  bootstrap.sql: |
+    -- Extensions
+    CREATE EXTENSION IF NOT EXISTS ltree;
+    CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+    -- Cache schema and refresh log
+    CREATE SCHEMA IF NOT EXISTS cache;
+    GRANT USAGE ON SCHEMA cache TO steampipe;
+
+    CREATE TABLE IF NOT EXISTS cache.refresh_log (
+      table_name     text PRIMARY KEY,
+      last_refreshed timestamptz,
+      duration_ms    integer,
+      status         text,
+      error_message  text,
+      retry_count    integer DEFAULT 0
+    );
+    ALTER TABLE cache.refresh_log ADD COLUMN IF NOT EXISTS retry_count integer DEFAULT 0;
+    GRANT SELECT ON cache.refresh_log TO steampipe;
+
+    CREATE OR REPLACE FUNCTION cache.refresh_and_log(p_table_name text) RETURNS void AS $fn$
+    DECLARE
+      start_ts timestamptz;
+      duration integer;
+    BEGIN
+      start_ts := clock_timestamp();
+      EXECUTE 'REFRESH MATERIALIZED VIEW CONCURRENTLY cache.' || p_table_name;
+      duration := extract(milliseconds from clock_timestamp() - start_ts)::integer;
+      INSERT INTO cache.refresh_log (table_name, last_refreshed, duration_ms, status, error_message)
+        VALUES (p_table_name, now(), duration, 'success', NULL)
+        ON CONFLICT (table_name) DO UPDATE
+          SET last_refreshed = EXCLUDED.last_refreshed,
+              duration_ms = EXCLUDED.duration_ms,
+              status = EXCLUDED.status,
+              error_message = EXCLUDED.error_message,
+              retry_count = 0;
+    EXCEPTION WHEN OTHERS THEN
+      duration := extract(milliseconds from clock_timestamp() - start_ts)::integer;
+      INSERT INTO cache.refresh_log (table_name, last_refreshed, duration_ms, status, error_message)
+        VALUES (p_table_name, now(), duration, 'failed', SQLERRM)
+        ON CONFLICT (table_name) DO UPDATE
+          SET last_refreshed = EXCLUDED.last_refreshed,
+              duration_ms = EXCLUDED.duration_ms,
+              status = EXCLUDED.status,
+              error_message = EXCLUDED.error_message;
+    END;
+    $fn$ LANGUAGE plpgsql;
+
+    CREATE OR REPLACE FUNCTION cache.retry_failed_refreshes(p_max_retries integer DEFAULT 3)
+    RETURNS void AS $$
+    DECLARE
+      failed_table text;
+    BEGIN
+      FOR failed_table IN
+        SELECT table_name FROM cache.refresh_log
+        WHERE status = 'failed'
+          AND retry_count < p_max_retries
+      LOOP
+        UPDATE cache.refresh_log
+          SET retry_count = retry_count + 1
+          WHERE table_name = failed_table;
+
+        PERFORM cache.refresh_and_log(failed_table);
+      END LOOP;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    SELECT cron.schedule(
+      'retry-failed-refreshes',
+      '{{ .Values.retry.schedule }}',
+      $$SELECT cache.retry_failed_refreshes({{ .Values.retry.maxRetries }})$$
+    );

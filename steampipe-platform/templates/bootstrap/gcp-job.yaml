@@ -1,0 +1,71 @@
+{{- if .Values.providers.gcp }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "steampipe-platform.fullname" . }}-gcp-bootstrap
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "steampipe-platform.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "steampipe-platform.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-db
+          image: postgres:14
+          env:
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "steampipe-platform.dbSuperuserSecretName" . }}
+                  key: host
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "steampipe-platform.dbSuperuserSecretName" . }}
+                  key: username
+          command: ["sh", "-c"]
+          args:
+            - |
+              until pg_isready -h $PGHOST -U $PGUSER; do
+                echo "Waiting for database..."
+                sleep 5
+              done
+      containers:
+        - name: apply-sql
+          image: postgres:14
+          env:
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "steampipe-platform.dbSuperuserSecretName" . }}
+                  key: host
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "steampipe-platform.dbSuperuserSecretName" . }}
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "steampipe-platform.dbSuperuserSecretName" . }}
+                  key: password
+            - name: PGDATABASE
+              value: steampipe
+          command: ["psql", "-f", "/sql/bootstrap.sql"]
+          volumeMounts:
+            - name: bootstrap-sql
+              mountPath: /sql
+      volumes:
+        - name: bootstrap-sql
+          configMap:
+            name: {{ include "steampipe-platform.fullname" . }}-gcp-bootstrap-sql
+{{- end }}

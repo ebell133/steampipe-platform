@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "steampipe-platform.fullname" . }}-powerpipe
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "steampipe-platform.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: powerpipe
+  template:
+    metadata:
+      labels:
+        app: powerpipe
+    spec:
+      containers:
+        - name: powerpipe
+          image: {{ .Values.powerpipe.image }}
+          ports:
+            - containerPort: {{ .Values.powerpipe.port }}
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "steampipe-platform.dbAppSecretName" . }}
+                  key: password
+            - name: POWERPIPE_INSTALL_DIR
+              value: "/tmp/powerpipe"
+          volumeMounts:
+            - name: powerpipe-config
+              mountPath: /tmp/powerpipe/config/steampipe.ppc
+              subPath: steampipe.ppc
+      volumes:
+        - name: powerpipe-config
+          configMap:
+            name: {{ include "steampipe-platform.fullname" . }}-powerpipe-config

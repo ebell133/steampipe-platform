@@ -1,0 +1,159 @@
+{{- if .Values.providers.gcp }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "steampipe-platform.fullname" . }}-gcp-bootstrap-sql
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "steampipe-platform.labels" . | nindent 4 }}
+data:
+  bootstrap.sql: |
+    CREATE EXTENSION IF NOT EXISTS steampipe_postgres_gcp;
+
+    {{- if not .Values.providers.gcp.projects }}
+    -- =============================================
+    -- SINGLE-PROJECT MODE
+    -- =============================================
+
+    -- Foreign server
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'steampipe_gcp') THEN
+        CREATE SERVER steampipe_gcp FOREIGN DATA WRAPPER steampipe_postgres_gcp
+          OPTIONS (config E'project = "{{ .Values.providers.gcp.project }}"\ncredentials = {{ .Values.providers.gcp.credentials | toJson }}');
+      END IF;
+    END
+    $$;
+
+    -- Schemas
+    CREATE SCHEMA IF NOT EXISTS gcp;
+    IMPORT FOREIGN SCHEMA gcp FROM SERVER steampipe_gcp INTO gcp;
+
+    -- Grants
+    GRANT USAGE ON SCHEMA gcp TO steampipe;
+    GRANT SELECT ON ALL TABLES IN SCHEMA gcp TO steampipe;
+
+    -- Cached materialized views
+    {{- range .Values.providers.gcp.cachedTables }}
+
+    CREATE MATERIALIZED VIEW IF NOT EXISTS cache.{{ .name }}
+      AS SELECT * FROM gcp.{{ .name }};
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_{{ .name }}
+      ON cache.{{ .name }} ({{ join ", " .uniqueKey }});
+
+    SELECT cron.schedule(
+      'refresh-{{ .name }}',
+      '{{ .schedule }}',
+      $$SELECT cache.refresh_and_log('{{ .name }}')$$
+    );
+
+    GRANT SELECT ON cache.{{ .name }} TO steampipe;
+    {{- end }}
+
+    {{- else }}
+    -- =============================================
+    -- MULTI-PROJECT MODE
+    -- =============================================
+    {{- range .Values.providers.gcp.projects }}
+    -- Project: {{ .name }}
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'steampipe_gcp_{{ .name }}') THEN
+        CREATE SERVER steampipe_gcp_{{ .name }} FOREIGN DATA WRAPPER steampipe_postgres_gcp
+          OPTIONS (config E'credentials = {{ (default $.Values.providers.gcp.credentials .credentials) | toJson }}\nproject = "{{ .project }}"');
+      END IF;
+    END
+    $$;
+    CREATE SCHEMA IF NOT EXISTS gcp_{{ .name }};
+    IMPORT FOREIGN SCHEMA gcp FROM SERVER steampipe_gcp_{{ .name }} INTO gcp_{{ .name }};
+    GRANT USAGE ON SCHEMA gcp_{{ .name }} TO steampipe;
+    GRANT SELECT ON ALL TABLES IN SCHEMA gcp_{{ .name }} TO steampipe;
+    {{- end }}
+    
+    -- Per-project cached materialized views
+    {{- range $project := .Values.providers.gcp.projects }}
+    {{- range $table := $.Values.providers.gcp.cachedTables }}
+
+    CREATE MATERIALIZED VIEW IF NOT EXISTS cache.{{ $project.name }}_{{ $table.name }}
+      AS SELECT * FROM gcp_{{ $project.name }}.{{ $table.name }};
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_{{ $project.name }}_{{ $table.name }}
+      ON cache.{{ $project.name }}_{{ $table.name }} ({{ join ", " $table.uniqueKey }});
+
+    SELECT cron.schedule(
+      'refresh-{{ $project.name }}-{{ $table.name }}',
+      '{{ $table.schedule }}',
+      $$SELECT cache.refresh_and_log('{{ $project.name }}_{{ $table.name }}')$$
+    );
+
+    GRANT SELECT ON cache.{{ $project.name }}_{{ $table.name }} TO steampipe;
+    {{- end }}
+    {{- end }}
+
+    -- Aggregation views
+    CREATE SCHEMA IF NOT EXISTS gcp_all;
+    GRANT USAGE ON SCHEMA gcp_all TO steampipe;
+
+    {{- range $table := .Values.providers.gcp.cachedTables }}
+
+    CREATE OR REPLACE VIEW gcp_all.{{ $table.name }} AS
+    {{- range $i, $project := $.Values.providers.gcp.projects }}
+    {{- if $i }}
+      UNION ALL
+    {{- end }}
+      SELECT *, '{{ $project.name }}' AS x_member_project_name FROM cache.{{ $project.name }}_{{ $table.name }}
+    {{- end }};
+
+    GRANT SELECT ON gcp_all.{{ $table.name }} TO steampipe;
+    {{- end }}
+
+    DO $$
+    DECLARE
+      tbl text;
+      project text;
+      sql_text text;
+      first boolean;
+      project_schemas text[];
+    BEGIN
+      -- Build array of project schema names
+      project_schemas := ARRAY[{{- range $i, $project := .Values.providers.gcp.projects }}{{- if $i }}, {{ end }}'gcp_{{ $project.name }}'{{- end }}];
+
+      -- Loop through all tables in the first project schema
+      FOR tbl IN
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = project_schemas[1]
+        AND c.relkind = 'f'
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_class v
+          JOIN pg_namespace vn ON vn.oid = v.relnamespace
+          WHERE vn.nspname = 'gcp_all' AND v.relname = c.relname AND v.relkind = 'v'
+        )
+      LOOP
+
+        -- Build UNION ALL view across all project schemas
+        sql_text := 'CREATE OR REPLACE VIEW gcp_all.' || tbl || ' AS ';
+        first := true;
+        FOREACH project IN ARRAY project_schemas LOOP
+          IF NOT first THEN
+            sql_text := sql_text || ' UNION ALL ';
+          END IF;
+          sql_text := sql_text || 'SELECT *, ''' || 
+            replace(project, 'gcp_', '') || 
+            '''::text AS x_member_project_name FROM ' || project || '.' || tbl;
+          first := false;
+        END LOOP;
+
+        EXECUTE sql_text;
+        EXECUTE 'GRANT SELECT ON gcp_all.' || tbl || ' TO steampipe';
+      END LOOP;
+    END
+    $$;
+
+    {{- end }}
+
+    -- Set default search path
+    ALTER DATABASE steampipe SET search_path TO {{ include "steampipe-platform.searchPath" . }};
+{{- end }}

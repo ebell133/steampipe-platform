@@ -1,0 +1,16 @@
+{{- if .Values.providers.aws }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "steampipe-platform.fullname" . }}-aws-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "steampipe-platform.labels" . | nindent 4 }}
+data:
+  config: |
+    {{- range .Values.providers.aws.accounts }}
+    [profile {{ .name }}]
+    role_arn = {{ .roleArn }}
+    credential_source = Environment
+    {{- end }}
+{{- end }}

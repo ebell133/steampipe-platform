@@ -1,0 +1,5 @@
+# fdw extension
+comment = 'Steampipe kubernetes Foreign Data Wrapper'
+default_version = '1.0'
+module_pathname = '$libdir/steampipe_postgres_kubernetes.so'
+relocatable = true

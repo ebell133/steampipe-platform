@@ -1,0 +1,116 @@
+namespace: steampipe
+
+database:
+  clusterName: steampipe-db
+  instances: 1
+  imageName: eliaz133/steampipe-pg14:14.2-bookworm
+  enableSuperuserAccess: true
+  storageSize: 5Gi
+  parameters:
+    shared_buffers: "128MB"
+    max_connections: "100"
+    cron.database_name: "steampipe"
+
+retry:
+  schedule: "*/30 * * * *"
+  maxRetries: 3
+
+providers:
+  aws:
+    credentialsSecretName: aws-credentials
+    accounts:
+      - name: dev_qa
+        roleArn: "arn:aws:iam::559040700938:role/steampipe-readonly-poc"
+        regions: [us-east-1, us-west-2 ]
+      - name: staging
+        roleArn: "arn:aws:iam::962057350495:role/steampipe-readonly-poc"
+        regions: [us-west-2 ]
+    cachedTables:
+      - name: aws_vpc
+        uniqueKey:
+          - vpc_id
+          - region
+        schedule: "0 */6 * * *"
+      - name: aws_vpc_security_group
+        uniqueKey:
+          - group_id
+          - region
+        schedule: "1 */6 * * *"
+      - name: aws_vpc_security_group_rule
+        uniqueKey:
+          - security_group_rule_id
+          - region
+        schedule: "2 */6 * * *"
+      - name: aws_ec2_network_interface
+        uniqueKey:
+          - network_interface_id
+          - region
+        schedule: "3 */6 * * *"
+      - name: aws_ec2_instance
+        uniqueKey:
+          - instance_id
+          - region
+        schedule: "4 */6 * * *"
+      - name: aws_vpc_eip
+        uniqueKey:
+          - arn 
+          - region
+        schedule: "5 */6 * * *"
+      - name: aws_eks_cluster
+        uniqueKey:
+          - arn
+          - region
+        schedule: "6 */6 * * *"
+      - name: aws_vpc_eip_address_transfer
+        uniqueKey:
+          - allocation_id
+          - region
+        schedule: "7 */6 * * *"
+      - name: aws_vpc_endpoint
+        uniqueKey:
+          - vpc_endpoint_id
+          - region
+        schedule: "8 */6 * * *"
+      - name: aws_vpc_internet_gateway
+        uniqueKey:
+          - internet_gateway_id
+          - region
+        schedule: "9 */6 * * *"
+      - name: aws_vpc_nat_gateway
+        uniqueKey:
+          - arn
+          - region
+        schedule: "10 */6 * * *"
+      - name: aws_vpc_network_acl
+        uniqueKey:
+          - arn
+          - region
+        schedule: "11 */6 * * *"
+      - name: aws_vpc_subnet
+        uniqueKey:
+          - subnet_arn
+          - region
+        schedule: "12 */6 * * *"
+  gcp:
+    credentialsSecret: gcp-credentials
+    credentials: "/projected/gcp/credentials.json"
+    projects:
+      - name: roadie_sso
+        project: roadie-sso
+    cachedTables:
+      - name: gcp_service_account
+        uniqueKey:
+          - project
+          - unique_id
+        schedule: "13 */6 * * *"
+      - name: gcp_compute_network
+        uniqueKey:
+          - project
+          - id
+        schedule: "14 */6 * * *"
+    
+
+
+powerpipe:
+  image: eliaz133/powerpipe:0.2.1
+  port: 9033

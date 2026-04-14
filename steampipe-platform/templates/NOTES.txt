@@ -1,0 +1,93 @@
+Steampipe Platform has been deployed to namespace: {{ .Values.namespace }}
+
+Prerequisites:
+  Ensure the AWS credentials secret exists before installing:
+
+    kubectl -n {{ .Values.namespace }} create secret generic {{ .Values.providers.aws.credentialsSecretName }} \
+      --from-literal=AWS_ACCESS_KEY_ID=<your-key-id> \
+      --from-literal=AWS_SECRET_ACCESS_KEY=<your-secret-key> \
+      --from-literal=AWS_REGION=<your-region>
+
+Database:
+  CNPG cluster "{{ include "steampipe-platform.dbClusterName" . }}" with {{ .Values.database.instances }} instance(s)
+  Bootstrap SQL configures {{ len .Values.providers.aws.cachedTables }} cached table(s) with pg_cron refresh schedules
+
+Powerpipe:
+  Access the dashboard:
+
+    kubectl -n {{ .Values.namespace }} port-forward svc/{{ include "steampipe-platform.fullname" . }}-powerpipe {{ .Values.powerpipe.port }}:{{ .Values.powerpipe.port }}
+
+  Then open: http://localhost:{{ .Values.powerpipe.port }}
+{{- if .Values.providers.aws.accounts }}
+
+Mode: Multi-Account ({{ len .Values.providers.aws.accounts }} account(s))
+
+Accounts:
+{{- range .Values.providers.aws.accounts }}
+  - {{ .name }} (role: {{ .roleArn }})
+    Schema: aws_{{ .name }}
+    Cache prefix: cache.{{ .name }}_<table>
+{{- end }}
+
+Aggregation:
+  Schema: aws_all
+  Search path: cache, aws_all, public
+  Query example: SELECT * FROM aws_all.aws_vpc WHERE account_name = 'prod';
+
+Cached Tables (per account):
+{{- range .Values.providers.aws.cachedTables }}
+  - {{ .name }} (schedule: {{ .schedule }})
+{{- end }}
+
+On-Demand Refresh:
+  To manually refresh a cached table (instead of waiting for the cron schedule):
+
+    kubectl -n {{ .Values.namespace }} exec -it {{ include "steampipe-platform.dbClusterName" . }}-1 -- psql -U postgres -d steampipe -c "
+      SELECT cache.refresh_and_log('<account_name>_<table_name>');
+    "
+
+  Check refresh status:
+
+    kubectl -n {{ .Values.namespace }} exec -it {{ include "steampipe-platform.dbClusterName" . }}-1 -- psql -U postgres -d steampipe -c "
+      SELECT * FROM cache.refresh_log ORDER BY last_refreshed DESC;
+    "
+
+Manual table removal (multi-account):
+  To remove a cached table for a specific account, run:
+
+    kubectl -n {{ .Values.namespace }} exec -it {{ include "steampipe-platform.dbClusterName" . }}-1 -- psql -U postgres -d steampipe -c "
+      SELECT cron.unschedule('refresh-<account_name>-<table_name>');
+      DROP MATERIALIZED VIEW IF EXISTS cache.<account_name>_<table_name> CASCADE;
+    "
+
+  After removing, recreate the aggregation view or run helm upgrade to rebuild it.
+{{- else }}
+
+Mode: Single-Account
+
+Cached Tables:
+{{- range .Values.providers.aws.cachedTables }}
+  - {{ .name }} (schedule: {{ .schedule }})
+{{- end }}
+
+On-Demand Refresh:
+  To manually refresh a cached table:
+
+    kubectl -n {{ .Values.namespace }} exec -it {{ include "steampipe-platform.dbClusterName" . }}-1 -- psql -U postgres -d steampipe -c "
+      SELECT cache.refresh_and_log('<table_name>');
+    "
+
+  Check refresh status:
+
+    kubectl -n {{ .Values.namespace }} exec -it {{ include "steampipe-platform.dbClusterName" . }}-1 -- psql -U postgres -d steampipe -c "
+      SELECT * FROM cache.refresh_log ORDER BY last_refreshed DESC;
+    "
+
+Manual table removal:
+  To remove a cached table, run:
+
+    kubectl -n {{ .Values.namespace }} exec -it {{ include "steampipe-platform.dbClusterName" . }}-1 -- psql -U postgres -d steampipe -c "
+      SELECT cron.unschedule('refresh-<table_name>');
+      DROP MATERIALIZED VIEW IF EXISTS cache.<table_name> CASCADE;
+    "
+{{- end }}

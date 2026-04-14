@@ -1,0 +1,80 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "steampipe-platform.dbClusterName" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "steampipe-platform.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.database.instances }}
+  imageName: {{ .Values.database.imageName }}
+  enableSuperuserAccess: {{ .Values.database.enableSuperuserAccess }}
+
+  storage:
+    size: {{ .Values.database.storageSize }}
+  
+  {{- if or (and .Values.providers.aws .Values.providers.aws.accounts) .Values.providers.gcp }}
+  projectedVolumeTemplate:
+    sources:
+      {{- if and .Values.providers.aws .Values.providers.aws.accounts }}
+      - configMap:
+          name: {{ include "steampipe-platform.fullname" . }}-aws-config
+          items:
+            - key: config
+              path: aws/config
+      {{- end }}
+      {{- if .Values.providers.gcp }}
+      - secret:
+          name: {{ .Values.providers.gcp.credentialsSecret }}
+          items:
+            - key: credentials.json
+              path: gcp/credentials.json
+      {{- end }}
+  {{- end }}
+
+  env:
+    {{- if .Values.providers.aws }}
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: {{ .Values.providers.aws.credentialsSecretName }}
+          key: AWS_ACCESS_KEY_ID
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: {{ .Values.providers.aws.credentialsSecretName }}
+          key: AWS_SECRET_ACCESS_KEY
+    - name: AWS_REGION
+      valueFrom:
+        secretKeyRef:
+          name: {{ .Values.providers.aws.credentialsSecretName }}
+          key: AWS_REGION
+    {{- if .Values.providers.aws.accounts }}
+    - name: AWS_CONFIG_FILE
+      value: /projected/aws/config
+    {{- end }}
+    {{- end }}
+
+    {{- if .Values.providers.gcp }}
+    - name: GOOGLE_APPLICATION_CREDENTIALS
+      value: /projected/gcp/credentials.json
+    {{- end }}
+
+  bootstrap:
+    initdb:
+      database: steampipe
+      owner: steampipe
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: {{ include "steampipe-platform.fullname" . }}-bootstrap-sql
+            key: bootstrap.sql
+
+  postgresql:
+    shared_preload_libraries:
+      - pg_cron
+    pg_hba:
+      - "host steampipe steampipe all scram-sha-256"
+    parameters:
+      {{- range $key, $value := .Values.database.parameters }}
+      {{ $key }}: {{ $value | quote }}
+      {{- end }}

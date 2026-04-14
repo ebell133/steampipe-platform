@@ -1,0 +1,159 @@
+{{- if .Values.providers.aws }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "steampipe-platform.fullname" . }}-aws-bootstrap-sql
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "steampipe-platform.labels" . | nindent 4 }}
+data:
+  bootstrap.sql: |
+    CREATE EXTENSION IF NOT EXISTS steampipe_postgres_aws;
+
+    {{- if not .Values.providers.aws.accounts }}
+    -- =============================================
+    -- SINGLE-ACCOUNT MODE
+    -- =============================================
+
+    -- Foreign server
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'steampipe_aws') THEN
+        CREATE SERVER steampipe_aws FOREIGN DATA WRAPPER steampipe_postgres_aws
+          OPTIONS (config 'regions = {{ .Values.providers.aws.regions | toJson }}');
+      END IF;
+    END
+    $$;
+
+    -- Schemas
+    CREATE SCHEMA IF NOT EXISTS aws;
+    IMPORT FOREIGN SCHEMA aws FROM SERVER steampipe_aws INTO aws;
+
+    -- Grants
+    GRANT USAGE ON SCHEMA aws TO steampipe;
+    GRANT SELECT ON ALL TABLES IN SCHEMA aws TO steampipe;
+
+    -- Cached materialized views
+    {{- range .Values.providers.aws.cachedTables }}
+
+    CREATE MATERIALIZED VIEW IF NOT EXISTS cache.{{ .name }}
+      AS SELECT * FROM aws.{{ .name }};
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_{{ .name }}
+      ON cache.{{ .name }} ({{ join ", " .uniqueKey }});
+
+    SELECT cron.schedule(
+      'refresh-{{ .name }}',
+      '{{ .schedule }}',
+      $$SELECT cache.refresh_and_log('{{ .name }}')$$
+    );
+
+    GRANT SELECT ON cache.{{ .name }} TO steampipe;
+    {{- end }}
+
+    {{- else }}
+    -- =============================================
+    -- MULTI-ACCOUNT MODE
+    -- =============================================
+    {{- range .Values.providers.aws.accounts }}
+    -- Account: {{ .name }}
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'steampipe_aws_{{ .name }}') THEN
+        CREATE SERVER steampipe_aws_{{ .name }} FOREIGN DATA WRAPPER steampipe_postgres_aws
+          OPTIONS (config E'regions = {{ (default $.Values.providers.aws.regions .regions) | toJson }}\nprofile = "{{ .name }}"');
+      END IF;
+    END
+    $$;
+    CREATE SCHEMA IF NOT EXISTS aws_{{ .name }};
+    IMPORT FOREIGN SCHEMA aws FROM SERVER steampipe_aws_{{ .name }} INTO aws_{{ .name }};
+    GRANT USAGE ON SCHEMA aws_{{ .name }} TO steampipe;
+    GRANT SELECT ON ALL TABLES IN SCHEMA aws_{{ .name }} TO steampipe;
+    {{- end }}
+    
+    -- Per-account cached materialized views
+    {{- range $account := .Values.providers.aws.accounts }}
+    {{- range $table := $.Values.providers.aws.cachedTables }}
+
+    CREATE MATERIALIZED VIEW IF NOT EXISTS cache.{{ $account.name }}_{{ $table.name }}
+      AS SELECT * FROM aws_{{ $account.name }}.{{ $table.name }};
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_{{ $account.name }}_{{ $table.name }}
+      ON cache.{{ $account.name }}_{{ $table.name }} ({{ join ", " $table.uniqueKey }});
+
+    SELECT cron.schedule(
+      'refresh-{{ $account.name }}-{{ $table.name }}',
+      '{{ $table.schedule }}',
+      $$SELECT cache.refresh_and_log('{{ $account.name }}_{{ $table.name }}')$$
+    );
+
+    GRANT SELECT ON cache.{{ $account.name }}_{{ $table.name }} TO steampipe;
+    {{- end }}
+    {{- end }}
+
+    -- Aggregation views
+    CREATE SCHEMA IF NOT EXISTS aws_all;
+    GRANT USAGE ON SCHEMA aws_all TO steampipe;
+
+    {{- range $table := .Values.providers.aws.cachedTables }}
+
+    CREATE OR REPLACE VIEW aws_all.{{ $table.name }} AS
+    {{- range $i, $account := $.Values.providers.aws.accounts }}
+    {{- if $i }}
+      UNION ALL
+    {{- end }}
+      SELECT *, '{{ $account.name }}' AS x_member_account_name FROM cache.{{ $account.name }}_{{ $table.name }}
+    {{- end }};
+
+    GRANT SELECT ON aws_all.{{ $table.name }} TO steampipe;
+    {{- end }}
+
+    DO $$
+    DECLARE
+      tbl text;
+      acct text;
+      sql_text text;
+      first boolean;
+      account_schemas text[];
+    BEGIN
+      -- Build array of account schema names
+      account_schemas := ARRAY[{{- range $i, $account := .Values.providers.aws.accounts }}{{- if $i }}, {{ end }}'aws_{{ $account.name }}'{{- end }}];
+
+      -- Loop through all tables in the first account schema
+      FOR tbl IN
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = account_schemas[1]
+        AND c.relkind = 'f'
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_class v
+          JOIN pg_namespace vn ON vn.oid = v.relnamespace
+          WHERE vn.nspname = 'aws_all' AND v.relname = c.relname AND v.relkind = 'v'
+        )
+      LOOP
+
+        -- Build UNION ALL view across all account schemas
+        sql_text := 'CREATE OR REPLACE VIEW aws_all.' || tbl || ' AS ';
+        first := true;
+        FOREACH acct IN ARRAY account_schemas LOOP
+          IF NOT first THEN
+            sql_text := sql_text || ' UNION ALL ';
+          END IF;
+          sql_text := sql_text || 'SELECT *, ''' || 
+            replace(acct, 'aws_', '') || 
+            '''::text AS x_member_account_name FROM ' || acct || '.' || tbl;
+          first := false;
+        END LOOP;
+
+        EXECUTE sql_text;
+        EXECUTE 'GRANT SELECT ON aws_all.' || tbl || ' TO steampipe';
+      END LOOP;
+    END
+    $$;
+
+    {{- end }}
+
+    -- Set default search path
+    ALTER DATABASE steampipe SET search_path TO {{ include "steampipe-platform.searchPath" . }};
+{{- end }}
