@@ -1,3 +1,4 @@
 vendor/fdw/kubernetes/*.so
 tester/
 .cursor/
+docs/datatank-gap-analysis.md
