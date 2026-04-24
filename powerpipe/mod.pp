@@ -13,5 +13,8 @@ mod "local" {
     mod "github.com/turbot/steampipe-mod-gcp-insights" {
       version = "*"
     }
+    mod "github.com/turbot/steampipe-mod-kubernetes-insights" {
+      version = "*"
+    }
   }
 }

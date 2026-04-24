@@ -91,6 +91,13 @@ cache,
 {{- end }}
 {{- else }} gcp,
 {{- end }}
+{{- end }}
+{{- if .Values.providers.kubernetes }}
+{{- if .Values.providers.kubernetes.clusters }} k8s_all,
+{{- range .Values.providers.kubernetes.clusters }} k8s_{{ .name }},
+{{- end }}
+{{- else }} k8s,
+{{- end }}
 {{- end }} public
 {{- end }}
 

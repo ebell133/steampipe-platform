@@ -9,11 +9,19 @@ spec:
   instances: {{ .Values.database.instances }}
   imageName: {{ .Values.database.imageName }}
   enableSuperuserAccess: {{ .Values.database.enableSuperuserAccess }}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.database.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 
   storage:
     size: {{ .Values.database.storageSize }}
   
-  {{- if or (and .Values.providers.aws .Values.providers.aws.accounts) .Values.providers.gcp }}
+  {{- if or (and .Values.providers.aws .Values.providers.aws.accounts) .Values.providers.gcp (and .Values.providers.kubernetes .Values.providers.kubernetes.clusters) }}
   projectedVolumeTemplate:
     sources:
       {{- if and .Values.providers.aws .Values.providers.aws.accounts }}
@@ -29,6 +37,15 @@ spec:
           items:
             - key: credentials.json
               path: gcp/credentials.json
+      {{- end }}
+      {{- if and .Values.providers.kubernetes .Values.providers.kubernetes.clusters }}
+      {{- range .Values.providers.kubernetes.clusters }}
+      - secret:
+          name: {{ .kubeconfigSecret }}
+          items:
+            - key: {{ .kubeconfigKey | default "kubeconfig" }}
+              path: kubernetes/{{ .name }}/kubeconfig
+      {{- end }}
       {{- end }}
   {{- end }}
 

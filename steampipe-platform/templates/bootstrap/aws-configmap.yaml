@@ -36,6 +36,8 @@ data:
     -- Cached materialized views
     {{- range .Values.providers.aws.cachedTables }}
 
+    SELECT cache.evolve_matview('cache', '{{ .name }}', 'aws', '{{ .name }}');
+
     CREATE MATERIALIZED VIEW IF NOT EXISTS cache.{{ .name }}
       AS SELECT * FROM aws.{{ .name }};
 
@@ -74,6 +76,8 @@ data:
     -- Per-account cached materialized views
     {{- range $account := .Values.providers.aws.accounts }}
     {{- range $table := $.Values.providers.aws.cachedTables }}
+
+    SELECT cache.evolve_matview('cache', '{{ $account.name }}_{{ $table.name }}', 'aws_{{ $account.name }}', '{{ $table.name }}');
 
     CREATE MATERIALIZED VIEW IF NOT EXISTS cache.{{ $account.name }}_{{ $table.name }}
       AS SELECT * FROM aws_{{ $account.name }}.{{ $table.name }};

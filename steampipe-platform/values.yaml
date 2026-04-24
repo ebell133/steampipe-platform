@@ -1,11 +1,22 @@
 namespace: steampipe
 
+global:
+  imagePullSecrets: []
+  # - name: container-registry-credentials
+
 database:
   clusterName: steampipe-db
   instances: 1
   imageName: eliaz133/steampipe-pg14:14.3-bookworm
   enableSuperuserAccess: true
   storageSize: 5Gi
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1536Mi"
+      cpu: "1500m"
   parameters:
     shared_buffers: "128MB"
     max_connections: "100"
@@ -108,9 +119,52 @@ providers:
           - project
           - id
         schedule: "14 */6 * * *"
+  kubernetes:
+    localCluster:
+      enabled: true
+    cachedTables:
+      - name: kubernetes_ingress
+        uniqueKey: [uid]
+        schedule: "15 */6 * * *"
+      - name: kubernetes_pod
+        uniqueKey: [uid]
+        schedule: "16 */6 * * *"
+      - name: kubernetes_secret
+        uniqueKey: [uid]
+        schedule: "17 */6 * * *"
+      - name: kubernetes_namespace
+        uniqueKey: [uid]
+        schedule: "18 */6 * * *"
+      - name: kubernetes_node
+        uniqueKey: [uid]
+        schedule: "19 */6 * * *"
     
-
-
 powerpipe:
-  image: eliaz133/powerpipe:0.2.1
+  image: eliaz133/powerpipe:0.2.4
   port: 9033
+  podSecurityContext:
+    fsGroup: 1000
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 9033
+    initialDelaySeconds: 180
+    periodSeconds: 15
+    failureThreshold: 4
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 9033
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
