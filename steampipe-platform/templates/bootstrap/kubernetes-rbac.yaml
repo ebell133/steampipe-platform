@@ -1,0 +1,27 @@
+{{- if and .Values.providers.kubernetes .Values.providers.kubernetes.localCluster .Values.providers.kubernetes.localCluster.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "steampipe-platform.fullname" . }}-k8s-reader
+  labels:
+    {{- include "steampipe-platform.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "steampipe-platform.fullname" . }}-k8s-reader
+  labels:
+    {{- include "steampipe-platform.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "steampipe-platform.dbClusterName" . }}
+    namespace: {{ .Values.namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "steampipe-platform.fullname" . }}-k8s-reader
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

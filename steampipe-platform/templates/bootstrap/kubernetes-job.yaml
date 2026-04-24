@@ -1,8 +1,8 @@
-{{- if .Values.providers.aws }}
+{{- if .Values.providers.kubernetes }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "steampipe-platform.fullname" . }}-aws-bootstrap
+  name: {{ include "steampipe-platform.fullname" . }}-kubernetes-bootstrap
   namespace: {{ .Values.namespace }}
   labels:
     {{- include "steampipe-platform.labels" . | nindent 4 }}
@@ -68,5 +68,5 @@ spec:
       volumes:
         - name: bootstrap-sql
           configMap:
-            name: {{ include "steampipe-platform.fullname" . }}-aws-bootstrap-sql
+            name: {{ include "steampipe-platform.fullname" . }}-kubernetes-bootstrap-sql
 {{- end }}

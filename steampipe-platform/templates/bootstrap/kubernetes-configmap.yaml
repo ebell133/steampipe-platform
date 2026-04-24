@@ -1,0 +1,151 @@
+{{- if .Values.providers.kubernetes }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "steampipe-platform.fullname" . }}-kubernetes-bootstrap-sql
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "steampipe-platform.labels" . | nindent 4 }}
+data:
+  bootstrap.sql: |
+    CREATE EXTENSION IF NOT EXISTS steampipe_postgres_kubernetes;
+
+    {{- if or (not .Values.providers.kubernetes.clusters) (and .Values.providers.kubernetes.localCluster .Values.providers.kubernetes.localCluster.enabled) }}
+    -- =============================================
+    -- SINGLE-CLUSTER MODE
+    -- =============================================
+
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'steampipe_kubernetes') THEN
+        CREATE SERVER steampipe_kubernetes FOREIGN DATA WRAPPER steampipe_postgres_kubernetes
+          OPTIONS (config E'source_types = ["deployed"]\ncustom_resource_tables = ["*"]');
+      END IF;
+    END
+    $$;
+
+    CREATE SCHEMA IF NOT EXISTS k8s;
+    IMPORT FOREIGN SCHEMA kubernetes FROM SERVER steampipe_kubernetes INTO k8s;
+
+    GRANT USAGE ON SCHEMA k8s TO steampipe;
+    GRANT SELECT ON ALL TABLES IN SCHEMA k8s TO steampipe;
+
+    {{- range .Values.providers.kubernetes.cachedTables }}
+
+    SELECT cache.evolve_matview('cache', '{{ .name }}', 'k8s', '{{ .name }}');
+
+    CREATE MATERIALIZED VIEW IF NOT EXISTS cache.{{ .name }}
+      AS SELECT * FROM k8s.{{ .name }};
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_{{ .name }}
+      ON cache.{{ .name }} ({{ join ", " .uniqueKey }});
+
+    SELECT cron.schedule(
+      'refresh-{{ .name }}',
+      '{{ .schedule }}',
+      $$SELECT cache.refresh_and_log('{{ .name }}')$$
+    );
+
+    GRANT SELECT ON cache.{{ .name }} TO steampipe;
+    {{- end }}
+    
+    {{- else }}
+    -- =============================================
+    -- MULTI-CLUSTER MODE
+    -- =============================================
+    {{- range .Values.providers.kubernetes.clusters }}
+    -- Cluster: {{ .name }}
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'steampipe_kubernetes_{{ .name }}') THEN
+        CREATE SERVER steampipe_kubernetes_{{ .name }} FOREIGN DATA WRAPPER steampipe_postgres_kubernetes
+          OPTIONS (config E'config_path = "/projected/kubernetes/{{ .name }}/kubeconfig"\nconfig_context = "{{ .context }}"\nsource_types = ["deployed"]\ncustom_resource_tables = ["*"]');
+      END IF;
+    END
+    $$;
+    CREATE SCHEMA IF NOT EXISTS k8s_{{ .name }};
+    IMPORT FOREIGN SCHEMA kubernetes FROM SERVER steampipe_kubernetes_{{ .name }} INTO k8s_{{ .name }};
+    GRANT USAGE ON SCHEMA k8s_{{ .name }} TO steampipe;
+    GRANT SELECT ON ALL TABLES IN SCHEMA k8s_{{ .name }} TO steampipe;
+    {{- end }}
+
+    {{- range $cluster := .Values.providers.kubernetes.clusters }}
+    {{- range $table := $.Values.providers.kubernetes.cachedTables }}
+    SELECT cache.evolve_matview('cache', '{{ $cluster.name }}_{{ $table.name }}', 'k8s_{{ $cluster.name }}', '{{ $table.name }}');
+
+    CREATE MATERIALIZED VIEW IF NOT EXISTS cache.{{ $cluster.name }}_{{ $table.name }}
+      AS SELECT * FROM k8s_{{ $cluster.name }}.{{ $table.name }};
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_{{ $cluster.name }}_{{ $table.name }}
+      ON cache.{{ $cluster.name }}_{{ $table.name }} ({{ join ", " $table.uniqueKey }});
+
+    SELECT cron.schedule(
+      'refresh-{{ $cluster.name }}-{{ $table.name }}',
+      '{{ $table.schedule }}',
+      $$SELECT cache.refresh_and_log('{{ $cluster.name }}_{{ $table.name }}')$$
+    );
+
+    GRANT SELECT ON cache.{{ $cluster.name }}_{{ $table.name }} TO steampipe;
+    {{- end }}
+    {{- end }}
+
+    CREATE SCHEMA IF NOT EXISTS k8s_all;
+    GRANT USAGE ON SCHEMA k8s_all TO steampipe;
+
+    {{- range $table := .Values.providers.kubernetes.cachedTables }}
+
+    CREATE OR REPLACE VIEW k8s_all.{{ $table.name }} AS
+    {{- range $i, $cluster := $.Values.providers.kubernetes.clusters }}
+    {{- if $i }}
+      UNION ALL
+    {{- end }}
+      SELECT *, '{{ $cluster.name }}' AS x_member_cluster_name FROM cache.{{ $cluster.name }}_{{ $table.name }}
+    {{- end }};
+
+    GRANT SELECT ON k8s_all.{{ $table.name }} TO steampipe;
+    {{- end }}
+
+    DO $$
+    DECLARE
+      tbl text;
+      cluster text;
+      sql_text text;
+      first boolean;
+      cluster_schemas text[];
+    BEGIN
+      cluster_schemas := ARRAY[{{- range $i, $cluster := .Values.providers.kubernetes.clusters }}{{- if $i }}, {{ end }}'k8s_{{ $cluster.name }}'{{- end }}];
+
+      FOR tbl IN
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = cluster_schemas[1]
+        AND c.relkind = 'f'
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_class v
+          JOIN pg_namespace vn ON vn.oid = v.relnamespace
+          WHERE vn.nspname = 'k8s_all' AND v.relname = c.relname AND v.relkind = 'v'
+        )
+      LOOP
+        sql_text := 'CREATE OR REPLACE VIEW k8s_all.' || tbl || ' AS ';
+        first := true;
+        FOREACH cluster IN ARRAY cluster_schemas LOOP
+          IF NOT first THEN
+            sql_text := sql_text || ' UNION ALL ';
+          END IF;
+          sql_text := sql_text || 'SELECT *, ''' ||
+            replace(cluster, 'k8s_', '') ||
+            '''::text AS x_member_cluster_name FROM ' || cluster || '.' || tbl;
+          first := false;
+        END LOOP;
+
+        EXECUTE sql_text;
+        EXECUTE 'GRANT SELECT ON k8s_all.' || tbl || ' TO steampipe';
+      END LOOP;
+    END
+    $$;
+
+    {{- end }}
+
+    ALTER DATABASE steampipe SET search_path TO {{ include "steampipe-platform.searchPath" . }};
+{{- end }}

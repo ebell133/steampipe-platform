@@ -36,6 +36,8 @@ data:
     -- Cached materialized views
     {{- range .Values.providers.gcp.cachedTables }}
 
+    SELECT cache.evolve_matview('cache', '{{ .name }}', 'gcp', '{{ .name }}');
+
     CREATE MATERIALIZED VIEW IF NOT EXISTS cache.{{ .name }}
       AS SELECT * FROM gcp.{{ .name }};
 
@@ -74,6 +76,8 @@ data:
     -- Per-project cached materialized views
     {{- range $project := .Values.providers.gcp.projects }}
     {{- range $table := $.Values.providers.gcp.cachedTables }}
+
+    SELECT cache.evolve_matview('cache', '{{ $project.name }}_{{ $table.name }}', 'gcp_{{ $project.name }}', '{{ $table.name }}');
 
     CREATE MATERIALIZED VIEW IF NOT EXISTS cache.{{ $project.name }}_{{ $table.name }}
       AS SELECT * FROM gcp_{{ $project.name }}.{{ $table.name }};

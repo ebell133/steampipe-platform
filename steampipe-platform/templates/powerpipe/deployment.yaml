@@ -15,9 +15,29 @@ spec:
       labels:
         app: powerpipe
     spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.powerpipe.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: powerpipe
+          {{- with .Values.powerpipe.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: {{ .Values.powerpipe.image }}
+          {{- with .Values.powerpipe.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.powerpipe.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: {{ .Values.powerpipe.port }}
           env:
@@ -26,13 +46,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "steampipe-platform.dbAppSecretName" . }}
                   key: password
-            - name: POWERPIPE_INSTALL_DIR
-              value: "/tmp/powerpipe"
-          volumeMounts:
-            - name: powerpipe-config
-              mountPath: /tmp/powerpipe/config/steampipe.ppc
-              subPath: steampipe.ppc
-      volumes:
-        - name: powerpipe-config
-          configMap:
-            name: {{ include "steampipe-platform.fullname" . }}-powerpipe-config
+          {{- with .Values.powerpipe.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

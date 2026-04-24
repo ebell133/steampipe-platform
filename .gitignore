@@ -3,3 +3,5 @@ vendor/fdw/kubernetes/*.tar.gz
 tester/
 .cursor/
 docs/datatank-gap-analysis.md
+docs/qol-gap-analysis.md
+*.code-workspace
