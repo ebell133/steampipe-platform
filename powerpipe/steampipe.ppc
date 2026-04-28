@@ -1,7 +1,7 @@
 connection "steampipe" "default" {
-  host     = "steampipe-db-rw.steampipe.svc.cluster.local"
+  host     = env("PGHOST")
   port     = 5432
-  db       = "steampipe"
-  username = "steampipe"
+  db       = env("PGDATABASE")
+  username = env("PGUSER")
   password = env("PGPASSWORD")
 }

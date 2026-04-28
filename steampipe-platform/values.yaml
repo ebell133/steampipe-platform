@@ -1,146 +1,136 @@
+# -- Namespace to deploy the chart into
 namespace: steampipe
 
 global:
   imagePullSecrets: []
   # - name: container-registry-credentials
 
+# -- CloudNativePG PostgreSQL cluster configuration
 database:
+  # -- Name of the CNPG Cluster resource
   clusterName: steampipe-db
+  # -- Number of PostgreSQL instances (use 2+ for HA in production)
   instances: 1
-  imageName: eliaz133/steampipe-pg14:14.3-bookworm
+  # -- Container image with Steampipe FDW extensions installed.
+  # Build from the Dockerfile in the root of this repo.
+  # REQUIRED — chart will fail if left empty.
+  imageName: ""
   enableSuperuserAccess: true
-  storageSize: 5Gi
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "250m"
-    limits:
-      memory: "1536Mi"
-      cpu: "1500m"
+  storageSize: 10Gi
+  replicationSlots:
+    highAvailability:
+      enabled: false
+  inheritedMetadata:
+    annotations: {}
+    labels: {}
+  # -- Resource requests/limits for each database pod
+  resources: {}
+  #   requests:
+  #     memory: "1Gi"
+  #     cpu: "250m"
+  #   limits:
+  #     memory: "3Gi"
+  #     cpu: "1500m"
+  # -- PostgreSQL server parameters
   parameters:
     shared_buffers: "128MB"
     max_connections: "100"
     cron.database_name: "steampipe"
 
+# -- Retry configuration for failed materialized view refreshes
 retry:
+  # -- Cron schedule to check for and retry failed refreshes
   schedule: "*/30 * * * *"
   maxRetries: 3
 
+# -- Cloud provider configurations
+# Enable each provider you want to inventory. At least one must be enabled.
 providers:
+  # -- Amazon Web Services
   aws:
-    credentialsSecretName: aws-credentials
-    accounts:
-      - name: dev_qa
-        roleArn: "arn:aws:iam::559040700938:role/steampipe-readonly-poc"
-        regions: [us-east-1, us-west-2 ]
-      - name: staging
-        roleArn: "arn:aws:iam::962057350495:role/steampipe-readonly-poc"
-        regions: [us-west-2 ]
-    cachedTables:
-      - name: aws_vpc
-        uniqueKey:
-          - vpc_id
-          - region
-        schedule: "0 */6 * * *"
-      - name: aws_vpc_security_group
-        uniqueKey:
-          - group_id
-          - region
-        schedule: "1 */6 * * *"
-      - name: aws_vpc_security_group_rule
-        uniqueKey:
-          - security_group_rule_id
-          - region
-        schedule: "2 */6 * * *"
-      - name: aws_ec2_network_interface
-        uniqueKey:
-          - network_interface_id
-          - region
-        schedule: "3 */6 * * *"
-      - name: aws_ec2_instance
-        uniqueKey:
-          - instance_id
-          - region
-        schedule: "4 */6 * * *"
-      - name: aws_vpc_eip
-        uniqueKey:
-          - arn 
-          - region
-        schedule: "5 */6 * * *"
-      - name: aws_eks_cluster
-        uniqueKey:
-          - arn
-          - region
-        schedule: "6 */6 * * *"
-      - name: aws_vpc_eip_address_transfer
-        uniqueKey:
-          - allocation_id
-          - region
-        schedule: "7 */6 * * *"
-      - name: aws_vpc_endpoint
-        uniqueKey:
-          - vpc_endpoint_id
-          - region
-        schedule: "8 */6 * * *"
-      - name: aws_vpc_internet_gateway
-        uniqueKey:
-          - internet_gateway_id
-          - region
-        schedule: "9 */6 * * *"
-      - name: aws_vpc_nat_gateway
-        uniqueKey:
-          - arn
-          - region
-        schedule: "10 */6 * * *"
-      - name: aws_vpc_network_acl
-        uniqueKey:
-          - arn
-          - region
-        schedule: "11 */6 * * *"
-      - name: aws_vpc_subnet
-        uniqueKey:
-          - subnet_arn
-          - region
-        schedule: "12 */6 * * *"
+    # -- Set to true to enable the AWS provider
+    enabled: false
+    # -- Name of the Kubernetes Secret containing AWS_ACCESS_KEY_ID,
+    # AWS_SECRET_ACCESS_KEY, and AWS_REGION
+    credentialsSecretName: ""
+    # -- Single-account mode is used when `accounts` is omitted.
+    # For multi-account mode, define a list of accounts with IAM role assumption:
+    # accounts:
+    #   - name: production
+    #     roleArn: "arn:aws:iam::111111111111:role/SteampipeReadOnly"
+    #     regions: [us-east-1, us-west-2]
+    #   - name: staging
+    #     roleArn: "arn:aws:iam::222222222222:role/SteampipeReadOnly"
+    #     regions: [us-west-2]
+
+    # -- Tables to cache as materialized views with pg_cron refresh schedules.
+    # Each entry requires a unique key for REFRESH CONCURRENTLY.
+    cachedTables: []
+    # - name: aws_ec2_instance
+    #   uniqueKey:
+    #     - instance_id
+    #     - region
+    #   schedule: "0 */6 * * *"
+    # - name: aws_vpc_security_group
+    #   uniqueKey:
+    #     - group_id
+    #     - region
+    #   schedule: "20 */12 * * *"
+
+  # -- Google Cloud Platform
   gcp:
-    credentialsSecret: gcp-credentials
+    # -- Set to true to enable the GCP provider
+    enabled: false
+    # -- Name of the Kubernetes Secret containing the GCP service account key
+    credentialsSecret: ""
+    # -- Mount path for the GCP credentials JSON inside the database pod
     credentials: "/projected/gcp/credentials.json"
-    projects:
-      - name: roadie_sso
-        project: roadie-sso
-    cachedTables:
-      - name: gcp_service_account
-        uniqueKey:
-          - project
-          - unique_id
-        schedule: "13 */6 * * *"
-      - name: gcp_compute_network
-        uniqueKey:
-          - project
-          - id
-        schedule: "14 */6 * * *"
+    # -- Single-project mode is used when `projects` is omitted.
+    # For multi-project mode, define a list of projects:
+    # projects:
+    #   - name: my_project
+    #     project: my-gcp-project-id
+
+    # -- Tables to cache as materialized views with pg_cron refresh schedules
+    cachedTables: []
+    # - name: gcp_compute_instance
+    #   uniqueKey:
+    #     - project
+    #     - id
+    #   schedule: "0 */12 * * *"
+
+  # -- Kubernetes
   kubernetes:
+    # -- Set to true to enable the Kubernetes provider
+    enabled: false
+    # -- Enable to inventory the cluster this chart is deployed on.
+    # Creates a ClusterRole with broad read access.
     localCluster:
-      enabled: true
-    cachedTables:
-      - name: kubernetes_ingress
-        uniqueKey: [uid]
-        schedule: "15 */6 * * *"
-      - name: kubernetes_pod
-        uniqueKey: [uid]
-        schedule: "16 */6 * * *"
-      - name: kubernetes_secret
-        uniqueKey: [uid]
-        schedule: "17 */6 * * *"
-      - name: kubernetes_namespace
-        uniqueKey: [uid]
-        schedule: "18 */6 * * *"
-      - name: kubernetes_node
-        uniqueKey: [uid]
-        schedule: "19 */6 * * *"
-    
+      enabled: false
+    # -- For multi-cluster mode, define remote clusters with kubeconfig secrets:
+    # clusters:
+    #   - name: remote_cluster
+    #     kubeconfigSecret: remote-cluster-kubeconfig
+    #     kubeconfigKey: kubeconfig
+    #     context: remote-context
+
+    # -- Tables to cache as materialized views with pg_cron refresh schedules
+    cachedTables: []
+    # - name: kubernetes_pod
+    #   uniqueKey: [uid]
+    #   schedule: "0 */6 * * *"
+    # - name: kubernetes_namespace
+    #   uniqueKey: [uid]
+    #   schedule: "0 */12 * * *"
+
+# -- Powerpipe dashboard server configuration
 powerpipe:
-  image: eliaz133/powerpipe:0.2.4
+  # -- Container image for Powerpipe with mods installed.
+  # Build from powerpipe/Dockerfile in this repo.
+  # REQUIRED — chart will fail if left empty.
+  image: ""
+  podAnnotations: {}
+  # -- Port the Powerpipe server listens on
   port: 9033
   podSecurityContext:
     fsGroup: 1000
@@ -161,10 +151,11 @@ powerpipe:
       port: 9033
     initialDelaySeconds: 10
     periodSeconds: 10
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "100m"
-    limits:
-      memory: "512Mi"
-      cpu: "500m"
+  # -- Resource requests/limits for the Powerpipe pod
+  resources: {}
+  #   requests:
+  #     memory: "256Mi"
+  #     cpu: "100m"
+  #   limits:
+  #     memory: "512Mi"
+  #     cpu: "500m"

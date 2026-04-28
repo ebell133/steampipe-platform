@@ -1,4 +1,4 @@
-{{- if .Values.providers.kubernetes }}
+{{- if .Values.providers.kubernetes.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:

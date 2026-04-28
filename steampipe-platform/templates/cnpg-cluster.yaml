@@ -18,27 +18,37 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 
+  {{- with .Values.database.replicationSlots }}
+  replicationSlots:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+
+  {{- with .Values.database.inheritedMetadata }}
+  inheritedMetadata:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+
   storage:
     size: {{ .Values.database.storageSize }}
   
-  {{- if or (and .Values.providers.aws .Values.providers.aws.accounts) .Values.providers.gcp (and .Values.providers.kubernetes .Values.providers.kubernetes.clusters) }}
+  {{- if or (and .Values.providers.aws.enabled .Values.providers.aws.accounts) .Values.providers.gcp.enabled (and .Values.providers.kubernetes.enabled .Values.providers.kubernetes.clusters) }}
   projectedVolumeTemplate:
     sources:
-      {{- if and .Values.providers.aws .Values.providers.aws.accounts }}
+      {{- if and .Values.providers.aws.enabled .Values.providers.aws.accounts }}
       - configMap:
           name: {{ include "steampipe-platform.fullname" . }}-aws-config
           items:
             - key: config
               path: aws/config
       {{- end }}
-      {{- if .Values.providers.gcp }}
+      {{- if .Values.providers.gcp.enabled }}
       - secret:
           name: {{ .Values.providers.gcp.credentialsSecret }}
           items:
             - key: credentials.json
               path: gcp/credentials.json
       {{- end }}
-      {{- if and .Values.providers.kubernetes .Values.providers.kubernetes.clusters }}
+      {{- if and .Values.providers.kubernetes.enabled .Values.providers.kubernetes.clusters }}
       {{- range .Values.providers.kubernetes.clusters }}
       - secret:
           name: {{ .kubeconfigSecret }}
@@ -50,7 +60,7 @@ spec:
   {{- end }}
 
   env:
-    {{- if .Values.providers.aws }}
+    {{- if .Values.providers.aws.enabled }}
     - name: AWS_ACCESS_KEY_ID
       valueFrom:
         secretKeyRef:
@@ -72,7 +82,7 @@ spec:
     {{- end }}
     {{- end }}
 
-    {{- if .Values.providers.gcp }}
+    {{- if .Values.providers.gcp.enabled }}
     - name: GOOGLE_APPLICATION_CREDENTIALS
       value: /projected/gcp/credentials.json
     {{- end }}

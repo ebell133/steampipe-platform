@@ -1,4 +1,4 @@
-{{- if .Values.providers.gcp }}
+{{- if .Values.providers.gcp.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

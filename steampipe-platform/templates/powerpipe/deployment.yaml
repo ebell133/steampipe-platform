@@ -12,6 +12,10 @@ spec:
       app: powerpipe
   template:
     metadata:
+      {{- with .Values.powerpipe.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
         app: powerpipe
     spec:
@@ -41,6 +45,12 @@ spec:
           ports:
             - containerPort: {{ .Values.powerpipe.port }}
           env:
+            - name: PGHOST
+              value: {{ include "steampipe-platform.dbHost" . | quote }}
+            - name: PGDATABASE
+              value: "steampipe"
+            - name: PGUSER
+              value: "steampipe"
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:

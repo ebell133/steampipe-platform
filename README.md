@@ -43,15 +43,18 @@ Cloud APIs / K8s APIs
 ├── Dockerfile                     # Custom CNPG PostgreSQL image with FDW extensions
 ├── steampipe-platform/            # Helm chart
 │   ├── Chart.yaml
-│   ├── values.yaml
+│   ├── values.yaml                # Generic defaults (all providers disabled)
+│   ├── examples/                  # Example values files
+│   │   └── values-multi-account.yaml
 │   └── templates/
 │       ├── cnpg-cluster.yaml      # CloudNativePG Cluster resource
 │       ├── bootstrap/             # SQL bootstrap (cache, providers, cron)
-│       └── powerpipe/             # Powerpipe deployment + config
+│       └── powerpipe/             # Powerpipe deployment + service
 ├── powerpipe/                     # Powerpipe image build + mod config
 │   ├── Dockerfile
-│   └── mod.pp
-└── vendor/fdw/kubernetes/         # Self-built Kubernetes FDW binaries
+│   ├── mod.pp
+│   └── steampipe.ppc
+└── vendor/fdw/kubernetes/         # Self-built Kubernetes FDW extension metadata
 ```
 
 ## Kubernetes FDW
@@ -67,19 +70,101 @@ The resulting extension requires two `.so` files installed in PostgreSQL's lib d
 
 - Kubernetes cluster with [CloudNativePG operator](https://cloudnative-pg.io) installed
 - `kubectl` and `helm` configured
-- Cloud provider credentials (AWS IAM, GCP service account, Kubernetes kubeconfig)
+- Cloud provider credentials (AWS IAM keys, GCP service account, or Kubernetes kubeconfig)
 
 ## Quick Start
 
+### 1. Build the container images
+
+The chart requires two images that you build and push to your own registry:
+
 ```bash
-# Install the Helm chart
-helm install steampipe ./steampipe-platform -n steampipe --create-namespace
+# PostgreSQL image with Steampipe FDW extensions
+docker build -t your-registry/steampipe-pg14:14.3-bookworm .
+docker push your-registry/steampipe-pg14:14.3-bookworm
 
-# Port-forward Powerpipe dashboards
-kubectl port-forward -n steampipe svc/steampipe-powerpipe 9033:9033
-
-# Access dashboards at http://localhost:9033
+# Powerpipe dashboard image
+docker build -t your-registry/powerpipe:latest ./powerpipe
+docker push your-registry/powerpipe:latest
 ```
+
+### 2. Create your values file
+
+Copy the example and customize for your environment:
+
+```bash
+cp steampipe-platform/examples/values-multi-account.yaml my-values.yaml
+# Edit my-values.yaml with your image names, credentials, accounts, and tables
+```
+
+See [`steampipe-platform/values.yaml`](steampipe-platform/values.yaml) for all available options with documentation.
+
+### 3. Create prerequisite secrets
+
+```bash
+# AWS credentials
+kubectl -n steampipe create secret generic aws-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID=<your-key-id> \
+  --from-literal=AWS_SECRET_ACCESS_KEY=<your-secret-key> \
+  --from-literal=AWS_REGION=<your-default-region>
+
+# GCP credentials (if using GCP)
+kubectl -n steampipe create secret generic gcp-credentials \
+  --from-file=credentials.json=<path-to-service-account-key.json>
+```
+
+### 4. Install the chart
+
+**From a local clone:**
+
+```bash
+helm install steampipe ./steampipe-platform -f my-values.yaml \
+  -n steampipe --create-namespace
+```
+
+**From OCI registry:**
+
+```bash
+helm install steampipe oci://ghcr.io/<org>/steampipe-platform \
+  --version 0.1.0 -f my-values.yaml -n steampipe --create-namespace
+```
+
+### 5. Access dashboards
+
+```bash
+kubectl port-forward -n steampipe svc/steampipe-powerpipe 9033:9033
+# Open http://localhost:9033
+```
+
+## Configuration
+
+All providers are disabled by default. Enable each one you need in your values file:
+
+```yaml
+providers:
+  aws:
+    enabled: true
+    credentialsSecretName: aws-credentials
+    cachedTables:
+      - name: aws_ec2_instance
+        uniqueKey: [instance_id, region]
+        schedule: "0 */6 * * *"
+```
+
+For a complete multi-provider example, see [`steampipe-platform/examples/values-multi-account.yaml`](steampipe-platform/examples/values-multi-account.yaml).
+
+### Key Configuration Options
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `database.imageName` | CNPG PostgreSQL image with FDW extensions **(required)** | `""` |
+| `database.instances` | Number of PostgreSQL replicas | `1` |
+| `database.storageSize` | PVC size for each instance | `10Gi` |
+| `providers.aws.enabled` | Enable AWS provider | `false` |
+| `providers.gcp.enabled` | Enable GCP provider | `false` |
+| `providers.kubernetes.enabled` | Enable Kubernetes provider | `false` |
+| `powerpipe.image` | Powerpipe container image **(required)** | `""` |
+| `powerpipe.port` | Powerpipe server port | `9033` |
 
 ## License
 
