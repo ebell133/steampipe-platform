@@ -78,21 +78,21 @@ Database RW service hostname
 
 {{- define "steampipe-platform.searchPath" -}}
 cache,
-{{- if .Values.providers.aws }}
+{{- if .Values.providers.aws.enabled }}
 {{- if .Values.providers.aws.accounts }} aws_all,
 {{- range .Values.providers.aws.accounts }} aws_{{ .name }},
 {{- end }}
 {{- else }} aws,
 {{- end }}
 {{- end }}
-{{- if .Values.providers.gcp }}
+{{- if .Values.providers.gcp.enabled }}
 {{- if .Values.providers.gcp.projects }} gcp_all,
 {{- range .Values.providers.gcp.projects }} gcp_{{ .name }},
 {{- end }}
 {{- else }} gcp,
 {{- end }}
 {{- end }}
-{{- if .Values.providers.kubernetes }}
+{{- if .Values.providers.kubernetes.enabled }}
 {{- if .Values.providers.kubernetes.clusters }} k8s_all,
 {{- range .Values.providers.kubernetes.clusters }} k8s_{{ .name }},
 {{- end }}

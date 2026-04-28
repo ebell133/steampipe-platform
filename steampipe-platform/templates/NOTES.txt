@@ -1,7 +1,7 @@
 Steampipe Platform has been deployed to namespace: {{ .Values.namespace }}
 
 Prerequisites:
-{{- if .Values.providers.aws }}
+{{- if .Values.providers.aws.enabled }}
   AWS - Ensure the credentials secret exists before installing:
 
     kubectl -n {{ .Values.namespace }} create secret generic {{ .Values.providers.aws.credentialsSecretName }} \
@@ -9,13 +9,14 @@ Prerequisites:
       --from-literal=AWS_SECRET_ACCESS_KEY=<your-secret-key> \
       --from-literal=AWS_REGION=<your-region>
 {{- end }}
-{{- if .Values.providers.gcp }}
+{{- if .Values.providers.gcp.enabled }}
   GCP - Ensure the credentials secret exists before installing:
 
     kubectl -n {{ .Values.namespace }} create secret generic {{ .Values.providers.gcp.credentialsSecret }} \
       --from-file=credentials.json=<path-to-service-account-key.json>
 {{- end }}
-{{- if .Values.providers.kubernetes }}
+{{- if .Values.providers.kubernetes.enabled }}
+{{- if .Values.providers.kubernetes.clusters }}
   Kubernetes - Create a kubeconfig Secret for each target cluster before installing:
 {{- range .Values.providers.kubernetes.clusters }}
 
@@ -25,17 +26,18 @@ Prerequisites:
 
   Each kubeconfig should contain credentials with read access to the target cluster.
 {{- end }}
+{{- end }}
 
 Database:
   CNPG cluster "{{ include "steampipe-platform.dbClusterName" . }}" with {{ .Values.database.instances }} instance(s)
   Bootstrap SQL configures cached tables with pg_cron refresh schedules:
-{{- if .Values.providers.aws }}
+{{- if .Values.providers.aws.enabled }}
     AWS: {{ len .Values.providers.aws.cachedTables }} cached table(s)
 {{- end }}
-{{- if .Values.providers.gcp }}
+{{- if .Values.providers.gcp.enabled }}
     GCP: {{ len .Values.providers.gcp.cachedTables }} cached table(s)
 {{- end }}
-{{- if .Values.providers.kubernetes }}
+{{- if .Values.providers.kubernetes.enabled }}
     Kubernetes: {{ len .Values.providers.kubernetes.cachedTables }} cached table(s)
 {{- end }}
 
@@ -51,7 +53,7 @@ Check refresh status:
     kubectl -n {{ .Values.namespace }} exec -it {{ include "steampipe-platform.dbClusterName" . }}-1 -- psql -U postgres -d steampipe -c "
       SELECT * FROM cache.refresh_log ORDER BY last_refreshed DESC;
     "
-{{- if .Values.providers.aws }}
+{{- if .Values.providers.aws.enabled }}
 {{- if .Values.providers.aws.accounts }}
 
 AWS Mode: Multi-Account ({{ len .Values.providers.aws.accounts }} account(s))
@@ -109,7 +111,7 @@ Manual table removal:
     "
 {{- end }}
 {{- end }}
-{{- if .Values.providers.kubernetes }}
+{{- if .Values.providers.kubernetes.enabled }}
 {{- if .Values.providers.kubernetes.clusters }}
 
 Kubernetes Mode: Multi-Cluster ({{ len .Values.providers.kubernetes.clusters }} cluster(s))

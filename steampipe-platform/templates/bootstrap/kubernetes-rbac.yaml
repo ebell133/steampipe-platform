@@ -1,4 +1,4 @@
-{{- if and .Values.providers.kubernetes .Values.providers.kubernetes.localCluster .Values.providers.kubernetes.localCluster.enabled }}
+{{- if and .Values.providers.kubernetes.enabled .Values.providers.kubernetes.localCluster .Values.providers.kubernetes.localCluster.enabled }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

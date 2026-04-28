@@ -1,0 +1,87 @@
+# Example: Multi-account AWS + multi-project GCP + local Kubernetes cluster
+#
+# Usage:
+#   helm install steampipe oci://ghcr.io/<org>/steampipe-platform \
+#     -f values-multi-account.yaml -n steampipe --create-namespace
+
+database:
+  instances: 2
+  imageName: your-registry/steampipe-pg14:14.3-bookworm
+  storageSize: 20Gi
+  replicationSlots:
+    highAvailability:
+      enabled: true
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "250m"
+    limits:
+      memory: "3Gi"
+      cpu: "1500m"
+
+providers:
+  aws:
+    enabled: true
+    credentialsSecretName: aws-credentials
+    accounts:
+      - name: production
+        roleArn: "arn:aws:iam::111111111111:role/SteampipeReadOnly"
+        regions: [us-east-1, us-west-2]
+      - name: staging
+        roleArn: "arn:aws:iam::222222222222:role/SteampipeReadOnly"
+        regions: [us-west-2]
+    cachedTables:
+      - name: aws_ec2_instance
+        uniqueKey: [instance_id, region]
+        schedule: "0 */6 * * *"
+      - name: aws_vpc_security_group
+        uniqueKey: [group_id, region]
+        schedule: "20 */12 * * *"
+      - name: aws_s3_bucket
+        uniqueKey: [arn, region]
+        schedule: "30 */12 * * *"
+      - name: aws_iam_role
+        uniqueKey: [arn]
+        schedule: "40 3 * * *"
+
+  gcp:
+    enabled: true
+    credentialsSecret: gcp-credentials
+    credentials: "/projected/gcp/credentials.json"
+    projects:
+      - name: my_project
+        project: my-gcp-project-id
+      - name: shared_services
+        project: shared-services-project
+    cachedTables:
+      - name: gcp_compute_instance
+        uniqueKey: [project, id]
+        schedule: "0 */12 * * *"
+      - name: gcp_compute_network
+        uniqueKey: [project, id]
+        schedule: "1 */12 * * *"
+
+  kubernetes:
+    enabled: true
+    localCluster:
+      enabled: true
+    cachedTables:
+      - name: kubernetes_pod
+        uniqueKey: [uid]
+        schedule: "0 */6 * * *"
+      - name: kubernetes_namespace
+        uniqueKey: [uid]
+        schedule: "0 */12 * * *"
+      - name: kubernetes_node
+        uniqueKey: [uid]
+        schedule: "30 */12 * * *"
+
+powerpipe:
+  image: your-registry/powerpipe:latest
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"

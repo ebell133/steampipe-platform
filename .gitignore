@@ -5,3 +5,4 @@ tester/
 docs/datatank-gap-analysis.md
 docs/qol-gap-analysis.md
 *.code-workspace
+deploy/
